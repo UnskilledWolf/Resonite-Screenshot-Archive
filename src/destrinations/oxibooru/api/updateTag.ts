@@ -6,7 +6,7 @@ export default async function updateTag(
   category: string,
   version: Date
 ): Promise<boolean> {
-  const data = await genericCall('tag/', 'GET', headers, {
+  const data = await genericCall('tag/', 'PUT', headers, {
     args: tag,
     body: { category, version },
   });

@@ -1,15 +1,7 @@
 import { version as appVersion } from '../../../package.json';
 import { setTimeout } from 'timers/promises';
 import type { screenshotData } from '../../types';
-import type {
-  uploadPostResponse,
-  validatePostResponse,
-  safetyLevels,
-  getTagCategoriesResponse,
-  getTagResponse,
-  getTagSearchResponse,
-  getPostSearchResponse,
-} from './types';
+import type { safetyLevels } from './types';
 import config from '../../../config.json';
 import getTagCategories from './api/getTagCategories';
 import createTagCategory from './api/createTagCategory';
@@ -22,7 +14,6 @@ import searchTags from './api/searchTags';
 import searchPosts from './api/searchPosts';
 import updatePost from './api/updatePost';
 import deleteTag from './api/deleteTag';
-import type { resoniteUserRecord } from '../../sources/resonite/types';
 
 // if successful, send delete request for the image to resonite
 // async function deleteResoniteRecord(record: resoniteInventoryRecord, i: number) {

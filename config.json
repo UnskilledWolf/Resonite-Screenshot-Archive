@@ -14,6 +14,10 @@
       }
     ]
   },
+  "local": {
+    "directory": "/home/axiom/Pictures/Resonite",
+    "logFile": "/home/axiom/Pictures/Resonite.jsonl"
+  },
   "oxibooru": {
     "refreshUsernamesInMonths": 2,
     "dangerSettings": "READ DOCS BEFORE TOUCHING!",
