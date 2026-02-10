@@ -1,40 +1,4 @@
-export type userId = `U-${string}`;
-
-export type safetyLevels = 'safe' | 'sketchy' | 'unsafe'
-
-type location = {
-  name: string;
-  host: string;
-  accessLevel: 'Anyone' | 'RegisteredUsers' | 'FriendsOfFriends' | 'Private' | 'Contacts';
-  hiddenFromListing: boolean;
-};
-
-type camera = {
-  FOV: number;
-  manufacturer: string;
-  model: string;
-};
-
-export enum HTTPMethodOxibooru {
-  get = 'GET',
-  post = 'POST',
-  delete = 'DELETE',
-  put = 'PUT',
-}
-
-export type oxibooruFunctionTypes = {
-  [key: string]: {
-    method: HTTPMethodOxibooru;
-    endpoint: string;
-  };
-};
-
-export type tokenBody = {
-  entity: {
-    userId: string;
-    token: string;
-  };
-};
+export type safetyLevels = 'safe' | 'sketchy' | 'unsafe';
 
 export type uploadPostResponse = {
   token: string;
@@ -55,7 +19,7 @@ export type getTagResponse = {
   implications: string[];
   suggestions: string[];
   usages: string;
-}
+};
 
 export type getTagSearchResponse = {
   query: string;
@@ -73,7 +37,7 @@ export type getTagSearchResponse = {
     suggestions?: string[];
     usages?: string;
   }[];
-}
+};
 
 export type getPostSearchResponse = {
   query: string;
@@ -96,7 +60,7 @@ export type getPostSearchResponse = {
     suggestions?: string[];
     usages?: string;
   }[];
-}
+};
 
 export type getTagCategoriesResponse = {
   results: {
@@ -106,33 +70,5 @@ export type getTagCategoriesResponse = {
     usages: number;
     order: number;
     default: boolean;
-  }[]
+  }[];
 };
-
-export type resoniteInventoryRecord = {
-  id: string;
-  name: `Photo in ${string}`;
-  tags: string[];
-  assetUri?: string;
-  recordId: string;
-  imageURL: string;
-  assetURL: string;
-  recordType: 'object';
-  ownerId: string;
-  photoMetadata: {
-    location: location;
-    timeTaken: Date;
-    takenBy: userId;
-    appVersion: `${number}.${number}.${number}.${number}${`+${string}` | ''}`;
-    userIds: userId[];
-    camera: camera;
-  };
-};
-
-export type resoniteUserRecord = {
-  id: userId;
-  username: string;
-  profile: {
-    iconUrl: `resdb:///${string}`;
-  };
-} | null;
