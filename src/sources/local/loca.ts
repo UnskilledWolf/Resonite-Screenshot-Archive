@@ -12,7 +12,7 @@ function photoMetadataSummaryToScreenshotData(record: photoMetadataSummary): scr
     },
     metadata: {
       location: {
-        name: record.LocationName.replaceAll(/<[^>]+>/, ''),
+        name: record.LocationName.replaceAll(/<[^>]+>/g, ''),
         host: record.LocationHost.UserId,
         accessLevel: record.LocationAccessLevel,
         hiddenFromListing: record.LocationHiddenFromListing,
