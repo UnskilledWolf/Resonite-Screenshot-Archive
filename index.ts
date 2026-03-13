@@ -336,7 +336,7 @@ await assetRecordsClean.forEach(async (record, i) => {
       : null,
   ]
     .filter((tag) => tag)
-    .map((tag) => tag?.replaceAll(' ', '_'));
+    .map((tag) => tag?.replaceAll(' ', '_').replaceAll('\r', '').replaceAll('\n', ''));
 
   // get safety level
   let safety: safetyLevels = 'safe';
