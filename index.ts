@@ -2,7 +2,13 @@ import { BSON } from 'bson';
 
 import { brotliDecompressSync } from 'zlib';
 
+import { newQueue } from '@henrygd/queue';
+
 import { version as appVersion } from './package.json';
+
+import { rm, mkdir } from 'node:fs/promises';
+
+import { convert, identify } from 'imagemagick';
 
 import type {
   tokenBody,
@@ -20,7 +26,9 @@ import type {
 } from './types';
 import { HTTPMethodOxibooru } from './types';
 import config from './config.json';
-import { setTimeout } from 'timers/promises';
+
+// clear temp folder
+await rm('./dist', { recursive: true, force: true });
 
 // #region get userToken
 async function authenticateWithResonite(
@@ -121,14 +129,22 @@ const downloadRecords = baseRecords
 // #endregion
 
 // #region prepare asset
+// limit download
+const downloadQ = newQueue(10);
+const downloadedRecords: [Response, resoniteInventoryRecord][] = [];
+downloadRecords.forEach(async (record) => {
+  downloadQ.add(async () => {
+    // get resonite asset, that holds the component layout and image data
+    const rawFileOut = await fetch(record.assetURL);
+    downloadedRecords.push([rawFileOut, record]);
+  });
+});
+await downloadQ.done();
+
 // upcycle data and cleanup broken pictures.
 const assetRecords = await Promise.all(
-  downloadRecords.map(async (record) => {
-    // FIXME: If there are to many requests which causes teh Resonite API to lock up.
-    // await setTimeout(100);
-    // get resonite asset, that holds the component layout and image data
-    const rewFileOut = await fetch(record.assetURL);
-    const downloadedFile = await rewFileOut.bytes();
+  downloadedRecords.map(async ([rawFileOut, record]) => {
+    const downloadedFile = await rawFileOut.bytes();
     // brotli only uses buffers and remove a file prefix that causes issues on decompression: https://git.unix.dog/yosh/misc-scripts/src/commit/960d187fe42afb4ea2761c54e0e33ddfc54da2ab/resonite-photoexif#L108
     const buffer = Buffer.from(downloadedFile).subarray(9);
     const decompressedFile = await brotliDecompressSync(buffer);
@@ -171,6 +187,9 @@ const assetRecords = await Promise.all(
       throw new Error(`Not a known image system or not a screenshot. ${outRecord}`);
     }
     outRecord.assetURL = getAssetURL(staticTexture2D.Data.URL.Data);
+
+    // skip pics that are not on from Discords CDN
+    if (!outRecord.assetURL.includes('https://assets.resonite.com/')) return null;
 
     // FIXME: Hotfix: Skipping records that don't have the metadata filled out.
     if (photoMetadata.Data.LocationName.Data === null) return null;
@@ -215,7 +234,12 @@ oxibooruHeaders.append('Content-Type', 'application/json');
 oxibooruHeaders.append('Host', oxibooruHost);
 
 const oxibooruFunctions: oxibooruFunctionTypes = {
-  uploadPost: { method: HTTPMethodOxibooru.post, endpoint: 'uploads/' },
+  uploadFile: {
+    method: HTTPMethodOxibooru.post,
+    endpoint: 'uploads/',
+    removeHeaders: ['Content-Type'],
+  },
+  uploadLink: { method: HTTPMethodOxibooru.post, endpoint: 'uploads/' },
   validatePost: { method: HTTPMethodOxibooru.post, endpoint: 'posts/reverse-search/' },
   createPost: { method: HTTPMethodOxibooru.post, endpoint: 'posts/' },
   searchPosts: { method: HTTPMethodOxibooru.get, endpoint: 'posts/' },
@@ -227,6 +251,7 @@ const oxibooruFunctions: oxibooruFunctionTypes = {
   getTag: { method: HTTPMethodOxibooru.get, endpoint: 'tag/' },
   updateTag: { method: HTTPMethodOxibooru.put, endpoint: 'tag/' },
   deleteTag: { method: HTTPMethodOxibooru.delete, endpoint: 'tag/' },
+  mergeTags: { method: HTTPMethodOxibooru.post, endpoint: 'tag-merge/' },
 } as const;
 
 async function oxibooru(
@@ -234,10 +259,22 @@ async function oxibooru(
   args: string | undefined = '',
   body: object | undefined
 ) {
+  const customOxibooruHeaders = new Headers(oxibooruHeaders);
+  if (fn.removeHeaders) {
+    for (const header of fn.removeHeaders) {
+      customOxibooruHeaders.delete(header);
+    }
+  }
+
   const outRaw = await fetch(`${process.env.oxibooruInstance}/api/${fn.endpoint}${args}`, {
     method: fn.method,
-    body: body ? JSON.stringify(body) : undefined,
-    headers: oxibooruHeaders,
+    // @ts-ignore
+    body: body
+      ? customOxibooruHeaders.get('Content-type') === 'application/json'
+        ? JSON.stringify(body)
+        : body
+      : undefined,
+    headers: customOxibooruHeaders,
   });
   if (!outRaw.ok) {
     console.warn(fn.endpoint, outRaw.statusText, await outRaw.text(), { args, body });
@@ -276,8 +313,8 @@ if (config.oxibooru.useCategories) {
 
 // #region Create Posts
 // if successful, send delete request for the image to resonite
-async function deleteResoniteRecord(record: resoniteInventoryRecord, i: number) {
-  console.log(i, record.photoMetadata.location.name);
+async function deleteResoniteRecord(record: resoniteInventoryRecord, i: number, dup: boolean = false) {
+  console.log(i, record.photoMetadata.location.name, dup ? '- Skipped duplicate' : '');
   if (!config.oxibooru.deleteSourcePictures) return;
   await fetch(`https://api.resonite.com/users/${tokenBody.entity.userId}/records/${record.id}`, {
     method: HTTPMethodOxibooru.delete,
@@ -288,75 +325,120 @@ async function deleteResoniteRecord(record: resoniteInventoryRecord, i: number) 
 // clear out nulled records.
 const assetRecordsClean = assetRecords.filter((out) => out !== null);
 
+// limit upload
+const uploadQ = newQueue(10);
 await assetRecordsClean.forEach(async (record, i) => {
-  // upload file
-  const contentToken = (await oxibooru(oxibooruFunctions.uploadPost!, undefined, {
-    contentUrl: record.assetURL,
-  })) as uploadPostResponse;
-  if (!contentToken) return console.warn('Issue with uploading ', record.assetURL);
-  const validatePostResp = (await oxibooru(oxibooruFunctions.validatePost!, undefined, {
-    contentToken: contentToken.token,
-  })) as validatePostResponse;
-  if (validatePostResp.exactPost !== null) return deleteResoniteRecord(record, i);
+  uploadQ.add(async () => {
+    // picture has to be downloaded because of issues with the pictures having an alpha layer
+    await mkdir('./dist', { recursive: true });
+    const filename = `./dist/${record.assetURL.split('/').pop()}`;
+    // download pic
+    const fileDownload = await fetch(record.assetURL);
+    await Bun.write(filename, fileDownload);
 
-  // sanitize default tags
-  const defaultTags = record.tags.map((tag) => tag.replace(/<[^>]+>/g, ''));
-  [
-    record.photoMetadata.location.name.toLowerCase(),
-    defaultTags.find((tag) => tag.startsWith('texture_asset')) || '',
-    defaultTags.find((tag) => tag.startsWith('timestamp')) || '',
-    defaultTags.find((tag) => tag.startsWith('location_accesslevel')) || '',
-    defaultTags.find((tag) => tag.startsWith('location_hiddenfromlisting')) || '',
-    defaultTags.find((tag) => tag.startsWith('location_host')) || '',
-    defaultTags.find((tag) => tag.startsWith('location_name')) || '',
-    'in',
-  ].forEach((removeTag) => {
-    const removeIndex = defaultTags.indexOf(removeTag);
-    if (removeIndex !== -1) defaultTags.splice(removeIndex, 1);
+    const isPNG = await new Promise((resolve, reject) => {
+      identify(filename, async (err, stdout) => {
+        if (err || !stdout.format) return reject(err);
+        if (stdout.format === 'PNG') return resolve(true);
+        resolve(false);
+      });
+    });
+    let contentToken: uploadPostResponse = null;
+    if (isPNG === true) {
+      // fix the image
+      const filenameEdit = `${filename}_edit.png`;
+      await new Promise((resolve, reject) => {
+        convert(`${filename} -alpha off ${filenameEdit}`.split(' '), async (err, stdout) => {
+          if (err) return reject(err);
+          resolve(stdout);
+        });
+      });
+      // form data fuckery to upload the picture
+      const fileEditRaw = Bun.file(filenameEdit);
+      const formData = new FormData();
+      await formData.append('content', fileEditRaw);
+  
+      contentToken = await oxibooru(
+        oxibooruFunctions.uploadFile!,
+        undefined,
+        formData
+      ) as uploadPostResponse;
+    } else {
+      contentToken = await oxibooru(
+        oxibooruFunctions.uploadLink!,
+        undefined,
+        { contentUrl: record.assetURL }
+      ) as uploadPostResponse;
+    }
+
+    if (!contentToken) return console.warn('Issue with uploading', record.assetURL);
+    const validatePostResp = (await oxibooru(oxibooruFunctions.validatePost!, undefined, {
+      contentToken: contentToken.token,
+    })) as validatePostResponse;
+    if (!validatePostResp) return console.warn('Issue with verifying', record.assetURL);
+    if (validatePostResp.exactPost !== null) return deleteResoniteRecord(record, i, true);
+    if (validatePostResp.similarPosts && validatePostResp.similarPosts.some((post) => post.distance === 0)) return deleteResoniteRecord(record, i, true);
+
+    // sanitize default tags
+    const defaultTags = record.tags.map((tag) => tag.replace(/<[^>]+>/g, ''));
+    [
+      record.photoMetadata.location.name.toLowerCase(),
+      defaultTags.find((tag) => tag.startsWith('texture_asset')) || '',
+      defaultTags.find((tag) => tag.startsWith('timestamp')) || '',
+      defaultTags.find((tag) => tag.startsWith('location_accesslevel')) || '',
+      defaultTags.find((tag) => tag.startsWith('location_hiddenfromlisting')) || '',
+      defaultTags.find((tag) => tag.startsWith('location_host')) || '',
+      defaultTags.find((tag) => tag.startsWith('location_name')) || '',
+      'in',
+    ].forEach((removeTag) => {
+      const removeIndex = defaultTags.indexOf(removeTag);
+      if (removeIndex !== -1) defaultTags.splice(removeIndex, 1);
+    });
+
+    // get all data and put into array for tags
+    const tags = [
+      ...defaultTags,
+      ...record.photoMetadata.userIds,
+      `savedBy:${record.ownerId}`,
+      record.photoMetadata.location.name,
+      `sessionName:${record.photoMetadata.location.name}`,
+      `host:${record.photoMetadata.location.host}`,
+      record.photoMetadata.location.accessLevel,
+      `accessLevel:${record.photoMetadata.location.accessLevel}`,
+      record.photoMetadata.location.hiddenFromListing ? 'hiddenSession' : null,
+      `takenBy:${record.photoMetadata.takenBy}`,
+      record.photoMetadata.timeTaken.toISOString().split('T')[0],
+      appVersion,
+      record.photoMetadata.appVersion,
+      // check if modded app-version is set
+      record.photoMetadata.appVersion.includes('+')
+        ? record.photoMetadata.appVersion.split('+')[0]!
+        : null,
+    ]
+      .filter((tag) => tag)
+      .map((tag) => tag?.replaceAll(' ', '_').replaceAll('\r', '').replaceAll('\n', '').replace('/', '_'));
+
+    // get safety level
+    let safety: safetyLevels = 'safe';
+    // order is important
+    if (record.photoMetadata.location.accessLevel === 'FriendsOfFriends') safety = 'sketchy';
+    if (record.photoMetadata.location.accessLevel === 'Contacts') safety = 'unsafe';
+    if (record.photoMetadata.location.accessLevel === 'Private') safety = 'unsafe';
+    if (record.photoMetadata.location.hiddenFromListing === true) safety = 'unsafe';
+
+    // create post from tags
+    const post = await oxibooru(oxibooruFunctions.createPost!, undefined, {
+      // new Set deduplicated tags
+      tags: [...new Set(tags)],
+      contentToken: contentToken.token,
+      source: record.assetURL,
+      safety,
+    });
+    // delete resonite image if picture was added successfully
+    if (post) deleteResoniteRecord(record, i);
   });
-
-  // get all data and put into array for tags
-  const tags = [
-    ...defaultTags,
-    ...record.photoMetadata.userIds,
-    `savedBy:${record.ownerId}`,
-    record.photoMetadata.location.name,
-    `sessionName:${record.photoMetadata.location.name}`,
-    `host:${record.photoMetadata.location.host}`,
-    record.photoMetadata.location.accessLevel,
-    `accessLevel:${record.photoMetadata.location.accessLevel}`,
-    record.photoMetadata.location.hiddenFromListing ? 'hiddenSession' : null,
-    `takenBy:${record.photoMetadata.takenBy}`,
-    record.photoMetadata.timeTaken.toISOString().split('T')[0],
-    appVersion,
-    record.photoMetadata.appVersion,
-    // check if modded app-version is set
-    record.photoMetadata.appVersion.includes('+')
-      ? record.photoMetadata.appVersion.split('+')[0]!
-      : null,
-  ]
-    .filter((tag) => tag)
-    .map((tag) => tag?.replaceAll(' ', '_').replaceAll('\r', '').replaceAll('\n', ''));
-
-  // get safety level
-  let safety: safetyLevels = 'safe';
-  // order is important
-  if (record.photoMetadata.location.accessLevel === 'FriendsOfFriends') safety = 'sketchy';
-  if (record.photoMetadata.location.accessLevel === 'Contacts') safety = 'unsafe';
-  if (record.photoMetadata.location.accessLevel === 'Private') safety = 'unsafe';
-  if (record.photoMetadata.location.hiddenFromListing === true) safety = 'unsafe';
-
-  // create post from tags
-  const post = await oxibooru(oxibooruFunctions.createPost!, undefined, {
-    // new Set deduplicated tags
-    tags: [...new Set(tags)],
-    contentToken: contentToken.token,
-    source: record.assetURL,
-    safety,
-  });
-  // delete resonite image if picture was added successfully
-  if (post) deleteResoniteRecord(record, i);
 });
+await uploadQ.done();
 // #endregion
 
 // #region Update tag category
@@ -395,7 +477,7 @@ const categories = config.oxibooru.categories;
 // FIXME: want to use typeof categories, but im stoopid
 function updateCategoryTags(tags: string[] | userId[], category: string) {
   new Set(tags).forEach(async (tag) => {
-    const sanitizedTag = tag?.replaceAll(' ', '_');
+    const sanitizedTag = tag?.replaceAll(' ', '_').replaceAll('\r', '').replaceAll('\n', '').replace('/', '_');
     const foundTag = (await oxibooru(
       oxibooruFunctions.getTag!,
       sanitizedTag,
@@ -512,6 +594,15 @@ if (users && users.results) {
     const userRecord = (await userRecordRaw.json()) as resoniteUserRecord;
     if (!(userRecord && userRecord.username)) return;
     const names = user.names;
+    // // check if tag already exists
+    // const existingUsername = await oxibooru(oxibooruFunctions.getTag!, userRecord.username, undefined);
+    // if (existingUsername) {
+    //   oxibooru(oxibooruFunctions.mergeTags!, userId, {
+    //     mergeTo: userRecord.username,
+    //     mergeToVersion: user.version,
+    //   });
+    //   return null;
+    // }
     names.unshift(userRecord.username.replaceAll(' ', '_'));
     const description = userRecord.profile
       ? `<img src="${getAssetURL(userRecord.profile.iconUrl)}">`

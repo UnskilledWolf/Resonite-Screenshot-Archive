@@ -1,6 +1,6 @@
 export type userId = `U-${string}`;
 
-export type safetyLevels = 'safe' | 'sketchy' | 'unsafe'
+export type safetyLevels = 'safe' | 'sketchy' | 'unsafe';
 
 type location = {
   name: string;
@@ -26,6 +26,7 @@ export type oxibooruFunctionTypes = {
   [key: string]: {
     method: HTTPMethodOxibooru;
     endpoint: string;
+    removeHeaders?: string[];
   };
 };
 
@@ -38,11 +39,14 @@ export type tokenBody = {
 
 export type uploadPostResponse = {
   token: string;
-};
+} | null;
 
 export type validatePostResponse = {
   exactPost: null | string;
-  similarPosts: string[];
+  similarPosts: {
+    distance: number;
+    post: object;
+  }[]
 };
 
 export type getTagResponse = {
@@ -55,7 +59,7 @@ export type getTagResponse = {
   implications: string[];
   suggestions: string[];
   usages: string;
-}
+};
 
 export type getTagSearchResponse = {
   query: string;
@@ -73,7 +77,7 @@ export type getTagSearchResponse = {
     suggestions?: string[];
     usages?: string;
   }[];
-}
+};
 
 export type getPostSearchResponse = {
   query: string;
@@ -96,7 +100,7 @@ export type getPostSearchResponse = {
     suggestions?: string[];
     usages?: string;
   }[];
-}
+};
 
 export type getTagCategoriesResponse = {
   results: {
@@ -106,7 +110,7 @@ export type getTagCategoriesResponse = {
     usages: number;
     order: number;
     default: boolean;
-  }[]
+  }[];
 };
 
 export type resoniteInventoryRecord = {
