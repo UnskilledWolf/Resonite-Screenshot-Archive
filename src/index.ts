@@ -6,4 +6,5 @@ import resonite from './sources/resonite/resonite';
 // await oxibooru(screenshots);
 
 const screenshots = await local();
+console.log('Sending Screenshots to Oxibooru.');
 oxibooru(screenshots);
