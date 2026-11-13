@@ -1,4 +1,8 @@
 {
+  "general": {
+    "from": "local",
+    "to": "oxibooru"
+  },
   "resonite": {
     "photoLocation": "Inventory\\Screenies",
     "photoSystemsLegacy": [
