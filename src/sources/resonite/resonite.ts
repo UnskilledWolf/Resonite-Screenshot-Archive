@@ -4,6 +4,8 @@ import { BSON } from 'bson';
 import { brotliDecompressSync } from 'zlib';
 import type { authentificationResult, tokenBody, resoniteInventoryRecord } from './types';
 import { newQueue } from '@henrygd/queue';
+import fixImageFiles from './fixImageFiles';
+import { rm, mkdir } from 'node:fs/promises';
 
 // Authentication data is globally scoped to the module
 // This should be fine since it is never re-used
@@ -59,6 +61,9 @@ function getAssetURL(resdbUri: string): string {
 }
 
 export default async function resonite(): Promise<screenshotData[]> {
+  // clear temp folder
+  await rm('./dist', { recursive: true, force: true });
+
   const cfg = config['resonite'];
 
   // #region get userToken
@@ -204,9 +209,10 @@ export default async function resonite(): Promise<screenshotData[]> {
   );
   // #endregion
 
-  // Filter out null records and convert them to the generic format
-  return assetRecords
+  const cleanRecords = assetRecords
+  // Filter out null records
     .filter((record) => record !== null)
+  // Convert the records to the generic format
     .map((record) => {
       // sanitize default tags
       const defaultTags = record.tags.map((tag) => tag.replace(/<[^>]+>/g, ''));
@@ -234,6 +240,12 @@ export default async function resonite(): Promise<screenshotData[]> {
         additionalTags: defaultTags,
       };
     });
+
+  // Remove the alpha of PNGs
+  // Also modifies the screenshotData to be local paths
+  await fixImageFiles(cleanRecords);
+
+  return cleanRecords;
 }
 
 // if successful, send delete request for the image to resonite
