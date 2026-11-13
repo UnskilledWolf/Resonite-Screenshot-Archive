@@ -112,8 +112,6 @@ export type getTagCategoriesResponse = {
     default: boolean;
   }[];
 };
-<<<<<<< HEAD:src/destrinations/oxibooru/types.ts
-=======
 
 export type resoniteInventoryRecord = {
   id: string;
@@ -142,4 +140,3 @@ export type resoniteUserRecord = {
     iconUrl: `resdb:///${string}`;
   };
 } | null;
->>>>>>> 9a2862b7f6bee1c4f7f0e5ff6623fbb18411e5c9:types.ts

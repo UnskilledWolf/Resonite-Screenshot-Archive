@@ -8,6 +8,7 @@ import { newQueue } from '@henrygd/queue';
 import { blake3 } from '@noble/hashes/blake3.js';
 import searchPosts from './api/searchPosts';
 import config from '../../../config.json';
+import hashFile from '../../hashFile';
 export default async function processScreenshots(
   screenshots: screenshotData[],
   headers: Headers
@@ -41,10 +42,12 @@ async function processScreenshot(
     // Return if the file does not already exists
     // TODO: Should this return a deletion record if the file is already on the server or just ignore it?
     if (alreadyExists) {
-     console.log("Skipping " , record.file.path)
-      return null
-    };
+      console.log('Skipping ', record.file.path);
+      return null;
+    }
   }
+
+console.log(record.file.path)
 
   // upload file
   const contentToken = await uploadPost(headers, record.file);
@@ -106,10 +109,9 @@ async function processScreenshot(
 }
 
 async function existsOnRemote(filePath: string, headers: Headers): Promise<boolean> {
-  const fileData = await Bun.file(filePath).arrayBuffer();
-  const hash = blake3(new Uint8Array(fileData)).toHex();
+  const hash = await hashFile(filePath);
 
-  const response = await searchPosts(headers, `?content-checksum:${hash}`);
+  const response = await searchPosts(headers, `?query=content-checksum:${hash}`);
 
   if (!response) return false;
 
