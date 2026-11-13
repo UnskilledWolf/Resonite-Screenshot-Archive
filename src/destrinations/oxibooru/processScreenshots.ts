@@ -5,7 +5,9 @@ import uploadPost from './api/uploadPost';
 import validatePost from './api/validatePost';
 import createPost from './api/createPost';
 import { newQueue } from '@henrygd/queue';
-
+import { blake3 } from '@noble/hashes/blake3.js';
+import searchPosts from './api/searchPosts';
+import config from '../../../config.json';
 export default async function processScreenshots(
   screenshots: screenshotData[],
   headers: Headers
@@ -31,10 +33,23 @@ async function processScreenshot(
   record: screenshotData,
   headers: Headers
 ): Promise<deletionRecord<screenshotData> | null> {
+  // Check if the file already exists on remote
+  // Only works if the file is already on the local machine
+  if (config.oxibooru.checkForExistingHashes && !record.file.isRemote) {
+    const alreadyExists = await existsOnRemote(record.file.path, headers);
+
+    // Return if the file does not already exists
+    // TODO: Should this return a deletion record if the file is already on the server or just ignore it?
+    if (alreadyExists) {
+     console.log("Skipping " , record.file.path)
+      return null
+    };
+  }
+
   // upload file
   const contentToken = await uploadPost(headers, record.file);
   if (!contentToken) {
-    console.warn('Issue with uploading ', record.file);
+    console.warn('Issue with uploading ', record.file.path);
     return null;
   }
 
@@ -79,9 +94,24 @@ async function processScreenshot(
   const post = await createPost(headers, tags, contentToken.token, record.file, safety);
 
   // delete resonite image if picture was added successfully
-  if (post) return { original: record };
-  else {
-    console.warn('Issue with posting ', record.file);
+  if (post) {
+    console.log('Succesfully uploaded ', record.file.path);
+    return {
+      original: record,
+    };
+  } else {
+    console.warn('Issue with posting ', record.file.path);
     return null;
   }
+}
+
+async function existsOnRemote(filePath: string, headers: Headers): Promise<boolean> {
+  const fileData = await Bun.file(filePath).arrayBuffer();
+  const hash = blake3(new Uint8Array(fileData)).toHex();
+
+  const response = await searchPosts(headers, `?content-checksum:${hash}`);
+
+  if (!response) return false;
+
+  return response.results.length > 0;
 }

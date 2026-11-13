@@ -15,12 +15,15 @@
     ]
   },
   "local": {
-    "directory": "/home/axiom/Pictures/Resonite",
-    "logFile": "/home/axiom/Pictures/Resonite.jsonl"
+    "picturesDirectory": "$HOME/Pictures/Resonite",
+    "picturesLogFile": "$HOME/Pictures/Resonite.jsonl",
+    "videosDirectory": "$HOME/Videos/Resonite",
+    "videosLogFile": "$HOME/Videos/Resonite.jsonl"
   },
   "oxibooru": {
     "refreshUsernamesInMonths": 2,
     "dangerSettings": "READ DOCS BEFORE TOUCHING!",
+    "checkForExistingHashes": true,
     "deleteSourcePictures": false,
     "useCategories": true,
     "useLegacyMigrations": true,

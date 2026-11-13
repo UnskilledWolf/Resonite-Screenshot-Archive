@@ -1,5 +1,5 @@
 import oxibooru from './destrinations/oxibooru/oxibooru';
-import local from './sources/local/loca';
+import local from './sources/local/local';
 import resonite from './sources/resonite/resonite';
 
 // const screenshots = await resonite();

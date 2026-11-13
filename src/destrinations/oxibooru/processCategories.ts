@@ -18,7 +18,7 @@ export default async function processCategories(screenshots: screenshotData[], h
   await Promise.all(
     configTagCategories.map(async (configCategoryName, i) => {
       // Check if the category already exists
-      const categoryExists = configCategoryName in remoteTagCategories;
+      const categoryExists = remoteTagCategories.includes(configCategoryName);
 
       if (!categoryExists) {
         const output = await createTagCategory(headers, configCategoryName, 'default', i);

@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@henrygd/queue": "^1.2.0",
+    "@noble/hashes": "^2.4.0",
     "bson": "^6.10.4",
     "imagemagick": "^0.1.3"
   }

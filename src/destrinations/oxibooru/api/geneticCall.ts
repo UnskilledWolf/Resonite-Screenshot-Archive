@@ -11,7 +11,7 @@ export default async function genericCall(
   });
 
   if (!res.ok) {
-    console.warn(endpoint, res.statusText, await res.text(), data);
+    console.warn(res.url, res.statusText, await res.text(), data);
     return null;
   }
 
