@@ -235,3 +235,13 @@ export default async function resonite(): Promise<screenshotData[]> {
       };
     });
 }
+
+// if successful, send delete request for the image to resonite
+// async function deleteResoniteRecord(record: resoniteInventoryRecord) {
+//   console.log(i, record.photoMetadata.location.name);
+//   if (!config.oxibooru.deleteSourcePictures) return;
+//   await fetch(`https://api.resonite.com/users/${tokenBody.entity.userId}/records/${record.id}`, {
+//     method: HTTPMethodOxibooru.delete,
+//     headers: { Authorization },
+//   });
+// }

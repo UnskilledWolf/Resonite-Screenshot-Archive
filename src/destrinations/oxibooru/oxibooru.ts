@@ -1,212 +1,47 @@
-import { version as appVersion } from '../../../package.json';
-import { setTimeout } from 'timers/promises';
-import type { screenshotData } from '../../types';
-import type { safetyLevels } from './types';
+import type { deletionRecord, screenshotData } from '../../types';
 import config from '../../../config.json';
-import getTagCategories from './api/getTagCategories';
-import createTagCategory from './api/createTagCategory';
-import uploadPost from './api/uploadPost';
-import validatePost from './api/validatePost';
-import createPost from './api/createPost';
-import getTag from './api/getTag';
-import updateTag from './api/updateTag';
 import searchTags from './api/searchTags';
 import searchPosts from './api/searchPosts';
 import updatePost from './api/updatePost';
 import deleteTag from './api/deleteTag';
-import { newQueue } from '@henrygd/queue';
+import processScreenshots from './processScreenshots';
+import processCategories from './processCategories';
+import { updateCategoryTags } from './processCategories';
 
-// if successful, send delete request for the image to resonite
-// async function deleteResoniteRecord(record: resoniteInventoryRecord) {
-//   console.log(i, record.photoMetadata.location.name);
-//   if (!config.oxibooru.deleteSourcePictures) return;
-//   await fetch(`https://api.resonite.com/users/${tokenBody.entity.userId}/records/${record.id}`, {
-//     method: HTTPMethodOxibooru.delete,
-//     headers: { Authorization },
-//   });
-// }
-async function deleteResoniteRecord(record: any) {
-  console.error('TODO: Re-implement deletions');
-}
-
-async function processScreenshot(record: screenshotData, headers: Headers) {
-  // upload file
-  const contentToken = await uploadPost(headers, record.file);
-  if (!contentToken) return console.warn('Issue with uploading ', record.file);
-
-  // Check if the post already exists. If it does, delete the original record.
-  const validatePostResp = await validatePost(headers, contentToken.token);
-  if (validatePostResp && validatePostResp.exactPost !== null) return deleteResoniteRecord(record);
-
-  // get all data and put into array for tags
-  const tags = [
-    ...record.additionalTags,
-    ...record.metadata.userIds,
-    record.metadata.location.name,
-    `sessionName:${record.metadata.location.name}`,
-    `host:${record.metadata.location.host}`,
-    record.metadata.location.accessLevel,
-    `accessLevel:${record.metadata.location.accessLevel}`,
-    record.metadata.location.hiddenFromListing ? 'hiddenSession' : null,
-    `takenBy:${record.metadata.takenBy}`,
-    record.metadata.timeTaken.toISOString().split('T')[0],
-    appVersion,
-    record.metadata.appVersion,
-    // check if modded app-version is set
-    // TODO: See if there is a non-nested ternary way of doing this
-    record.metadata.appVersion
-      ? record.metadata.appVersion.includes('+')
-        ? record.metadata.appVersion.split('+')[0]!
-        : null
-      : null,
-  ]
-    .map((tag) => tag?.replaceAll(' ', '_'))
-    .filter((tag) => !(tag === undefined || tag === null));
-
-  // get safety level
-  let safety: safetyLevels = 'safe';
-  // order is important
-  if (record.metadata.location.accessLevel === 'FriendsOfFriends') safety = 'sketchy';
-  if (record.metadata.location.accessLevel === 'Contacts') safety = 'unsafe';
-  if (record.metadata.location.accessLevel === 'Private') safety = 'unsafe';
-  if (record.metadata.location.hiddenFromListing === true) safety = 'unsafe';
-
-  // create post from tags
-  const post = await createPost(headers, tags, contentToken.token, record.file, safety);
-
-  // delete resonite image if picture was added successfully
-  if (post) deleteResoniteRecord(record);
-}
-
-// FIXME: want to use typeof categories, but im stoopid
-async function updateCategoryTags(headers: Headers, tags: string[], category: string) {
-  const uniqueTags = Array.from(new Set(tags));
-
-  return Promise.all(
-    uniqueTags.map(async (tag) => {
-      const sanitizedTag = tag?.replaceAll(' ', '_');
-
-      const foundTag = await getTag(headers, sanitizedTag);
-      if (!foundTag) return console.warn(`Unable to find tag ${sanitizedTag} to update category.`);
-      if (foundTag.category === category) return;
-
-      await updateTag(headers, sanitizedTag, category, foundTag.version);
-    })
-  );
-}
-
-export default async function oxibooru(screenshots: screenshotData[]) {
-  // #region Oxibooru API Token
+function createOxibooruHeaders(): Headers {
   const oxibooruToken = Buffer.from(
     `${process.env.oxibooruUser}:${process.env.oxibooruToken}`
   ).toString('base64');
+
   const oxibooruHost = process.env.oxibooruInstance!.split('//')[1];
   if (!oxibooruHost) throw new Error('Unable to parse oxibooruInstance in env');
+
   const headers = new Headers();
   headers.append('Authorization', `Token ${oxibooruToken}`);
   headers.append('Accept', 'application/json');
   headers.append('Content-Type', 'application/json');
   headers.append('Host', oxibooruHost);
-  // #endregion
 
-  // #region Update categories
+  return headers;
+}
+
+export default async function oxibooru(
+  screenshots: screenshotData[]
+): Promise<deletionRecord<screenshotData>[]> {
+  const headers = createOxibooruHeaders();
+
+  // Process all screenshots and get what needs to be deleted
+  const deletionRecords = await processScreenshots(screenshots, headers);
+
   if (config.oxibooru.useCategories) {
-    const configTagCategories = Object.entries(config.oxibooru.categories).map((e) => e[1]);
-    const currentTagCategories = await getTagCategories(headers);
-
-    await Promise.all(
-      configTagCategories.map(async (configCategoryName, i) => {
-        // check, if category was created
-        const foundEntry = currentTagCategories.results.find(
-          (category) => category.name === configCategoryName
-        );
-
-        if (!foundEntry) {
-          const output = await createTagCategory(headers, configCategoryName, 'default', i);
-          if (!output) throw new Error("Couldn't create a category.");
-          return;
-        }
-      })
-    );
+    processCategories(screenshots, headers);
   }
-  // #endregion
-
-  // #region Create Posts
-  // TODO: Make a toggle to have the uploads be all at once or in sequence
-
-  const uploadQ = newQueue(10);
-  uploadQ.all(screenshots.map((record) => processScreenshot(record, headers)));
-  await uploadQ.done();
-
-  // #endregion
-
-  // #region Update tag category
-  if (!config.oxibooru.useCategories) process.exit();
-  const sortedTags = {
-    // TODO: POC! Has to be made the default and then broken down again on post-creation. not the other way around.
-    users: screenshots.flatMap((record) => record.metadata.userIds),
-    host: screenshots.flatMap((record) => `host:${record.metadata.location.host}`),
-    accessLevel: screenshots.flatMap((record) => [
-      `accessLevel:${record.metadata.location.accessLevel}`,
-      record.metadata.location.accessLevel,
-    ]),
-    savedBy: screenshots.flatMap((record) =>
-      record.additionalTags.filter((tag) => tag.startsWith('savedBy:'))
-    ), // Get saved by from addition tags
-    takenBy: screenshots.flatMap((record) => `takenBy:${record.metadata.takenBy}`),
-    sessionName: screenshots.flatMap((record) => [
-      `sessionName:${record.metadata.location.name}`,
-      record.metadata.location.name,
-    ]),
-    hidden: ['hiddenSession'],
-    dateTaken: screenshots.flatMap(
-      (record) => record.metadata.timeTaken.toISOString().split('T')[0]
-    ),
-    importerVersion: [appVersion],
-    gameVersion: screenshots.flatMap((record) => [
-      record.metadata.appVersion,
-      // check if modded app-version is set
-      record.metadata.appVersion
-        ? record.metadata.appVersion.includes('+')
-          ? record.metadata.appVersion.split('+')[0]!
-          : null
-        : null,
-    ]),
-  };
-
-  const isCategorySet = (categoryName: string) =>
-    Object.keys(config.oxibooru.categories).find((configName) => configName === categoryName);
-
-  const categories = config.oxibooru.categories;
-
-  if (isCategorySet('users')) updateCategoryTags(headers, sortedTags.users, categories.users);
-  if (isCategorySet('host')) updateCategoryTags(headers, sortedTags.host, categories.host);
-  if (isCategorySet('accessLevel'))
-    updateCategoryTags(headers, sortedTags.accessLevel, categories.accessLevel);
-  if (isCategorySet('savedBy')) updateCategoryTags(headers, sortedTags.savedBy, categories.savedBy);
-  if (isCategorySet('sessionName'))
-    updateCategoryTags(headers, sortedTags.sessionName, categories.sessionName);
-  if (isCategorySet('hidden')) updateCategoryTags(headers, sortedTags.hidden, categories.hidden);
-  if (isCategorySet('takenBy')) updateCategoryTags(headers, sortedTags.takenBy, categories.takenBy);
-  if (isCategorySet('dateTaken'))
-    updateCategoryTags(
-      headers,
-      sortedTags.dateTaken.filter((e) => e !== undefined),
-      categories.dateTaken
-    );
-  if (isCategorySet('importerVersion'))
-    updateCategoryTags(headers, sortedTags.importerVersion, categories.importerVersion);
-  if (isCategorySet('gameVersion'))
-    updateCategoryTags(
-      headers,
-      sortedTags.gameVersion.filter((e) => e !== null),
-      categories.gameVersion
-    );
-  // #endregion
 
   // #region Legacy migrations
+  // TODO: Overhaul the migration in general
   // This is a hack! Only needed to cleanup previous posts and will be deleted after.
-  if (!config.oxibooru.useLegacyMigrations) process.exit();
+  if (!config.oxibooru.useLegacyMigrations) return deletionRecords;
+
   if (!config.oxibooru.useCategories)
     console.warn('useCategories has to be true for migrating tags to categories.');
 
@@ -292,10 +127,8 @@ export default async function oxibooru(screenshots: screenshotData[]) {
   //   });
   // }
 
-  // all migrations below require the category feature to be enabled.
-  if (!config.oxibooru.useCategories) process.exit();
-
   // update legacy user categories
+  const categories = config.oxibooru.categories;
   const legacyUsers = await searchTags(
     headers,
     `?${new URLSearchParams({ query: 'U-* -category:User', limit: '200', fields: 'names' })}`
@@ -339,4 +172,6 @@ export default async function oxibooru(screenshots: screenshotData[]) {
       );
   }
   // #endregion
+
+  return deletionRecords;
 }

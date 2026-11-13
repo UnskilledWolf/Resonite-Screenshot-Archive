@@ -35,3 +35,9 @@ export type screenshotMetadata = {
   userIds: userId[];
   camera: camera;
 };
+
+// Wraps an original data structure in a deletion record
+// Just to ensure that data meant to be deleted is properly identifiable with the type system
+export type deletionRecord<A> = {
+  original: A
+}
