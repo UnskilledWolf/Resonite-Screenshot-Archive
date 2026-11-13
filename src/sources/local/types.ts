@@ -19,7 +19,7 @@ export type userInfoSummary = {
   SessionJoinTimestamp: string;
 };
 
-export type photoMetadataSummary = {
+export type MetadataSummary = {
   CameraManufacturer: string;
   CameraModel: string;
   CameraFOV: number;

@@ -14,9 +14,10 @@ import searchTags from './api/searchTags';
 import searchPosts from './api/searchPosts';
 import updatePost from './api/updatePost';
 import deleteTag from './api/deleteTag';
+import { newQueue } from '@henrygd/queue';
 
 // if successful, send delete request for the image to resonite
-// async function deleteResoniteRecord(record: resoniteInventoryRecord, i: number) {
+// async function deleteResoniteRecord(record: resoniteInventoryRecord) {
 //   console.log(i, record.photoMetadata.location.name);
 //   if (!config.oxibooru.deleteSourcePictures) return;
 //   await fetch(`https://api.resonite.com/users/${tokenBody.entity.userId}/records/${record.id}`, {
@@ -24,8 +25,57 @@ import deleteTag from './api/deleteTag';
 //     headers: { Authorization },
 //   });
 // }
-async function deleteResoniteRecord(record: any, i: any) {
+async function deleteResoniteRecord(record: any) {
   console.error('TODO: Re-implement deletions');
+}
+
+async function processScreenshot(record: screenshotData, headers: Headers) {
+  // upload file
+  const contentToken = await uploadPost(headers, record.file);
+  if (!contentToken) return console.warn('Issue with uploading ', record.file);
+
+  // Check if the post already exists. If it does, delete the original record.
+  const validatePostResp = await validatePost(headers, contentToken.token);
+  if (validatePostResp && validatePostResp.exactPost !== null) return deleteResoniteRecord(record);
+
+  // get all data and put into array for tags
+  const tags = [
+    ...record.additionalTags,
+    ...record.metadata.userIds,
+    record.metadata.location.name,
+    `sessionName:${record.metadata.location.name}`,
+    `host:${record.metadata.location.host}`,
+    record.metadata.location.accessLevel,
+    `accessLevel:${record.metadata.location.accessLevel}`,
+    record.metadata.location.hiddenFromListing ? 'hiddenSession' : null,
+    `takenBy:${record.metadata.takenBy}`,
+    record.metadata.timeTaken.toISOString().split('T')[0],
+    appVersion,
+    record.metadata.appVersion,
+    // check if modded app-version is set
+    // TODO: See if there is a non-nested ternary way of doing this
+    record.metadata.appVersion
+      ? record.metadata.appVersion.includes('+')
+        ? record.metadata.appVersion.split('+')[0]!
+        : null
+      : null,
+  ]
+    .map((tag) => tag?.replaceAll(' ', '_'))
+    .filter((tag) => !(tag === undefined || tag === null));
+
+  // get safety level
+  let safety: safetyLevels = 'safe';
+  // order is important
+  if (record.metadata.location.accessLevel === 'FriendsOfFriends') safety = 'sketchy';
+  if (record.metadata.location.accessLevel === 'Contacts') safety = 'unsafe';
+  if (record.metadata.location.accessLevel === 'Private') safety = 'unsafe';
+  if (record.metadata.location.hiddenFromListing === true) safety = 'unsafe';
+
+  // create post from tags
+  const post = await createPost(headers, tags, contentToken.token, record.file, safety);
+
+  // delete resonite image if picture was added successfully
+  if (post) deleteResoniteRecord(record);
 }
 
 // FIXME: want to use typeof categories, but im stoopid
@@ -82,67 +132,11 @@ export default async function oxibooru(screenshots: screenshotData[]) {
   // #endregion
 
   // #region Create Posts
-
-  async function processScreenshot(record: screenshotData, i: number) {
-    // upload file
-    const contentToken = await uploadPost(headers, record.file);
-    if (!contentToken) return console.warn('Issue with uploading ', record.file);
-
-    // Check if the post already exists. If it does, delete the original record.
-    const validatePostResp = await validatePost(headers, contentToken.token);
-    if (validatePostResp && validatePostResp.exactPost !== null)
-      return deleteResoniteRecord(record, i);
-
-    // get all data and put into array for tags
-    const tags = [
-      ...record.additionalTags,
-      ...record.metadata.userIds,
-      record.metadata.location.name,
-      `sessionName:${record.metadata.location.name}`,
-      `host:${record.metadata.location.host}`,
-      record.metadata.location.accessLevel,
-      `accessLevel:${record.metadata.location.accessLevel}`,
-      record.metadata.location.hiddenFromListing ? 'hiddenSession' : null,
-      `takenBy:${record.metadata.takenBy}`,
-      record.metadata.timeTaken.toISOString().split('T')[0],
-      appVersion,
-      record.metadata.appVersion,
-      // check if modded app-version is set
-      // TODO: See if there is a non-nested ternary way of doing this
-      record.metadata.appVersion
-        ? record.metadata.appVersion.includes('+')
-          ? record.metadata.appVersion.split('+')[0]!
-          : null
-        : null,
-    ]
-      .map((tag) => tag?.replaceAll(' ', '_'))
-      .filter((tag) => !(tag === undefined || tag === null));
-
-    // get safety level
-    let safety: safetyLevels = 'safe';
-    // order is important
-    if (record.metadata.location.accessLevel === 'FriendsOfFriends') safety = 'sketchy';
-    if (record.metadata.location.accessLevel === 'Contacts') safety = 'unsafe';
-    if (record.metadata.location.accessLevel === 'Private') safety = 'unsafe';
-    if (record.metadata.location.hiddenFromListing === true) safety = 'unsafe';
-
-    // create post from tags
-    const post = await createPost(headers, tags, contentToken.token, record.file, safety);
-
-    // delete resonite image if picture was added successfully
-    if (post) deleteResoniteRecord(record, i);
-  }
-
   // TODO: Make a toggle to have the uploads be all at once or in sequence
 
-  // await Promise.all(
-  //   screenshots.map(processScreenshot)
-  // );
-
-  for (const [i, record] of screenshots.entries()) {
-    console.log(`Sending ${record.file.path}.`)
-    await processScreenshot(record, i)
-  }
+  const uploadQ = newQueue(10);
+  uploadQ.all(screenshots.map((record) => processScreenshot(record, headers)));
+  await uploadQ.done();
 
   // #endregion
 

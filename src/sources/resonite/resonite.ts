@@ -3,6 +3,7 @@ import config from '../../../config.json';
 import { BSON } from 'bson';
 import { brotliDecompressSync } from 'zlib';
 import type { authentificationResult, tokenBody, resoniteInventoryRecord } from './types';
+import { newQueue } from '@henrygd/queue';
 
 // Authentication data is globally scoped to the module
 // This should be fine since it is never re-used
@@ -111,14 +112,21 @@ export default async function resonite(): Promise<screenshotData[]> {
   // #endregion
 
   // #region prepare asset
-  // upcycle data and cleanup broken pictures.
-  const assetRecords = await Promise.all(
-    downloadRecords.map(async (record) => {
-      // FIXME: If there are to many requests which causes the Resonite API to lock up.
-      // await setTimeout(100);
-
+  // limit download
+  const downloadQ = newQueue(10);
+  const downloadedRecords: [Response, resoniteInventoryRecord][] = [];
+  downloadRecords.forEach(async (record) => {
+    downloadQ.add(async () => {
       // get resonite asset, that holds the component layout and image data
       const rawFileOut = await fetch(record.assetURL);
+      downloadedRecords.push([rawFileOut, record]);
+    });
+  });
+  await downloadQ.done();
+
+  // upcycle data and cleanup broken pictures.
+  const assetRecords = await Promise.all(
+    downloadedRecords.map(async ([rawFileOut, record]) => {
       const downloadedFile = await rawFileOut.bytes();
       // brotli only uses buffers and remove a file prefix that causes issues on decompression: https://git.unix.dog/yosh/misc-scripts/src/commit/960d187fe42afb4ea2761c54e0e33ddfc54da2ab/resonite-photoexif#L108
       const buffer = Buffer.from(downloadedFile).subarray(9);
@@ -146,7 +154,7 @@ export default async function resonite(): Promise<screenshotData[]> {
         );
       } else {
         // legacy screenshots lack the Types definition. This is a hack to find the components with the correct data.
-        cfg.photoSystemsLegacy.forEach((photoSystem) => {
+        config.resonite.photoSystemsLegacy.forEach((photoSystem) => {
           if (record.tags.includes(photoSystem.triggerTag)) {
             staticTexture2D = components.find((comp: any) =>
               photoSystem.staticTexture2D.includes(comp.Type)
@@ -162,6 +170,9 @@ export default async function resonite(): Promise<screenshotData[]> {
         throw new Error(`Not a known image system or not a screenshot. ${outRecord}`);
       }
       outRecord.assetURL = getAssetURL(staticTexture2D.Data.URL.Data);
+
+      // skip pics that are not on from Discords CDN
+      if (!outRecord.assetURL.includes('https://assets.resonite.com/')) return null;
 
       // FIXME: Hotfix: Skipping records that don't have the metadata filled out.
       if (photoMetadata.Data.LocationName.Data === null) return null;

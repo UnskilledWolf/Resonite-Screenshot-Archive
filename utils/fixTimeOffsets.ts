@@ -1,7 +1,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import config from '../config.json';
-import type { photoMetadataSummary } from '../src/sources/local/types';
+import type { MetadataSummary } from '../src/sources/local/types';
 
 // !!! This one is extra experimental
 // Change the timezone to your current local timezone if you need to
@@ -18,7 +18,7 @@ async function fix() {
     .filter((line) => line.length > 1) // Filter out any lines that don't contain data
     // Convert each line to an object
     .map((line) => {
-      return JSON.parse(line) as photoMetadataSummary;
+      return JSON.parse(line) as MetadataSummary;
     });
 
   // Filter files that are missing locally

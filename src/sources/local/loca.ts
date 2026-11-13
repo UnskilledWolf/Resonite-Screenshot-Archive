@@ -1,10 +1,10 @@
 import type { screenshotData } from '../../types';
 import config from '../../../config.json';
-import type { photoMetadataSummary } from './types';
+import type { MetadataSummary } from './types';
 import path from 'node:path';
 import fs from 'node:fs';
 
-function photoMetadataSummaryToScreenshotData(record: photoMetadataSummary): screenshotData {
+function convertMetadataSummaryToScreenshotData(record: MetadataSummary): screenshotData {
   return {
     file: {
       path: path.join(config.local.directory, record.filename),
@@ -41,10 +41,10 @@ export default async function local(): Promise<screenshotData[]> {
     .filter((line) => line.length > 1) // Filter out any lines that don't contain data
     // Convert each line to an object
     .map((line) => {
-      return JSON.parse(line) as photoMetadataSummary;
+      return JSON.parse(line) as MetadataSummary;
     });
 
-  let screenshots = rawRecords.map((record) => photoMetadataSummaryToScreenshotData(record));
+  let screenshots = rawRecords.map((record) => convertMetadataSummaryToScreenshotData(record));
 
   // Filter files that are missing locally
   let prevSize = screenshots.length;
