@@ -8,12 +8,15 @@
     "start": "bun src/index"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "@types/imagemagick": "^0.0.35"
   },
   "peerDependencies": {
     "typescript": "^5"
   },
   "dependencies": {
-    "bson": "^6.10.4"
+    "@henrygd/queue": "^1.2.0",
+    "bson": "^6.10.4",
+    "imagemagick": "^0.1.3"
   }
 }
