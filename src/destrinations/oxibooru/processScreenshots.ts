@@ -5,10 +5,10 @@ import uploadPost from './api/uploadPost';
 import validatePost from './api/validatePost';
 import createPost from './api/createPost';
 import { newQueue } from '@henrygd/queue';
-import { blake3 } from '@noble/hashes/blake3.js';
 import searchPosts from './api/searchPosts';
 import config from '../../../config.json';
 import hashFile from '../../hashFile';
+
 export default async function processScreenshots(
   screenshots: screenshotData[],
   headers: Headers
@@ -46,8 +46,6 @@ async function processScreenshot(
       return null;
     }
   }
-
-console.log(record.file.path)
 
   // upload file
   const contentToken = await uploadPost(headers, record.file);
