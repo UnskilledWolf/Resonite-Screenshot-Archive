@@ -22,7 +22,8 @@
     "picturesDirectory": "$HOME/Pictures/Resonite",
     "picturesLogFile": "$HOME/Pictures/Resonite.jsonl",
     "videosDirectory": "$HOME/Videos/Resonite",
-    "videosLogFile": "$HOME/Videos/Resonite.jsonl"
+    "videosLogFile": "$HOME/Videos/Resonite.jsonl",
+    "preferredVideoFormat": "webm"
   },
   "oxibooru": {
     "refreshUsernamesInMonths": 2,

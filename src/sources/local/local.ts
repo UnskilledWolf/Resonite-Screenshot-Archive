@@ -72,6 +72,10 @@ async function processLog(logPath: string, dirPath: string): Promise<screenshotD
   // Caused by Resonite Issue #7513
   screenshots.forEach(resolveBrokenVideoExtension);
 
+  // Replace extensions for videos if they are re-encoded
+  if (config.local.preferredVideoFormat !== "mp4")
+    screenshots.forEach(convertMp4Extension)
+
   // Filter files that are missing locally
   let prevSize = screenshots.length;
   screenshots = screenshots.filter((record) => fs.existsSync(record.file.path));
@@ -115,4 +119,15 @@ function resolveBrokenVideoExtension(record: screenshotData) {
     }
   }
   // Any other extensions are ignored
+}
+
+// Changes the video extension to the preferred format in case of re-encodings
+// Modifies the original screenshot object
+function convertMp4Extension(record: screenshotData) {
+  const extension = path.extname(record.file.path);
+
+  // Only do things with mp4s
+  if (extension === ".mp4") {
+    record.file.path = record.file.path.replace(/mp4$/, config.local.preferredVideoFormat)
+  }
 }
